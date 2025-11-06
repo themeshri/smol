@@ -55,12 +55,41 @@ export async function scrapeAndScoreProject(
 
     console.log(`📥 Scraped ${tweets.length} tweets from Apify`);
 
+    // Get existing tweets that are less than 12 hours old to rescrape
+    const twelveHoursAgo = new Date();
+    twelveHoursAgo.setHours(twelveHoursAgo.getHours() - 12);
+
+    const existingTweetsResult = await dbPool.query(`
+      SELECT tweet_id, url FROM tweets
+      WHERE project_id = $1
+      AND posted_at > $2
+      AND is_active = true
+    `, [projectId, twelveHoursAgo]);
+
+    const existingTweetIds = new Set(existingTweetsResult.rows.map(t => t.tweet_id));
+    const scrapedTweetIds = new Set(tweets.map(t => t.id));
+
+    // Find tweets to rescrape (exist in DB but not in new search results)
+    const tweetsToRescrape = existingTweetsResult.rows.filter(
+      t => !scrapedTweetIds.has(t.tweet_id)
+    );
+
+    console.log(`🔄 Found ${tweetsToRescrape.length} existing tweets to rescrape`);
+
+    // Rescrape existing tweets by their URLs
+    const rescrapedTweets = await rescrapeTweetsByUrl(tweetsToRescrape.map(t => t.url));
+
+    console.log(`📥 Rescraped ${rescrapedTweets.length} existing tweets`);
+
+    // Combine all tweets (new search results + rescraped existing tweets)
+    const allTweets = [...tweets, ...rescrapedTweets];
+
     let newTweets = 0;
     let updatedTweets = 0;
     let totalPointsAwarded = 0;
 
     // Process each tweet
-    for (const tweet of tweets) {
+    for (const tweet of allTweets) {
       try {
         // Check if tweet is within 24 hours
         const postedAt = new Date(tweet.createdAt);
@@ -226,7 +255,7 @@ export async function scrapeAndScoreProject(
 
     return {
       success: true,
-      tweets_scraped: tweets.length,
+      tweets_scraped: allTweets.length,
       new_tweets: newTweets,
       updated_tweets: updatedTweets,
       points_awarded: totalPointsAwarded,
@@ -260,6 +289,28 @@ async function scrapeTweetsForProject(project: Project): Promise<ApifyTweetResul
   const { items } = await apifyClient.dataset(run.defaultDatasetId).listItems();
 
   return items as unknown as ApifyTweetResult[];
+}
+
+async function rescrapeTweetsByUrl(tweetUrls: string[]): Promise<ApifyTweetResult[]> {
+  if (tweetUrls.length === 0) {
+    return [];
+  }
+
+  const apifyClient = getApifyClient();
+
+  try {
+    const run = await apifyClient.actor(TWITTER_SCRAPER_ACTOR_ID).call({
+      urls: tweetUrls,
+      maxItems: tweetUrls.length,
+    });
+
+    const { items } = await apifyClient.dataset(run.defaultDatasetId).listItems();
+
+    return items as unknown as ApifyTweetResult[];
+  } catch (error) {
+    console.error('❌ Error rescaping tweets by URL:', error);
+    return [];
+  }
 }
 
 async function upsertUser(
