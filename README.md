@@ -44,6 +44,9 @@ POSTGRES_PASSWORD=your_password
 
 # Apify API
 APIFY_API_TOKEN=your_apify_token
+
+# Development Mode (set to 'true' to use mock data without Apify)
+USE_MOCK_DATA=true
 ```
 
 ### 3. Setup Database

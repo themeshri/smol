@@ -4,7 +4,10 @@
 import { Pool } from 'pg';
 import { getApifyClient, TWITTER_SCRAPER_ACTOR_ID, ApifyTweetResult } from '../apify-client';
 import { calculateDeltas, calculatePoints, isTweetActive } from './delta-calculator';
+import { MockApifyClient, generateMockTweets } from '../mock-data-generator';
 import { v4 as uuidv4 } from 'uuid';
+
+const USE_MOCK_DATA = process.env.USE_MOCK_DATA === 'true';
 
 interface Project {
   id: string;
@@ -49,11 +52,14 @@ export async function scrapeAndScoreProject(
     console.log(`📋 Project: ${project.name}`);
     console.log(`🔑 Keywords: ${project.keywords.join(', ')}`);
 
-    // Scrape tweets using Apify
-    const apifyClient = getApifyClient();
+    if (USE_MOCK_DATA) {
+      console.log(`🧪 DEVELOPMENT MODE - Using mock data`);
+    }
+
+    // Scrape tweets using Apify or mock data
     const tweets = await scrapeTweetsForProject(project);
 
-    console.log(`📥 Scraped ${tweets.length} tweets from Apify`);
+    console.log(`📥 Scraped ${tweets.length} tweets`);
 
     // Get existing tweets that are less than 12 hours old to rescrape
     const twelveHoursAgo = new Date();
@@ -274,6 +280,13 @@ export async function scrapeAndScoreProject(
 }
 
 async function scrapeTweetsForProject(project: Project): Promise<ApifyTweetResult[]> {
+  if (USE_MOCK_DATA) {
+    // Use mock data generator
+    const mockClient = new MockApifyClient();
+    return await mockClient.scrapeTweets(project.keywords, 100);
+  }
+
+  // Use real Apify
   const apifyClient = getApifyClient();
 
   // Create search terms with language filter
@@ -293,6 +306,12 @@ async function scrapeTweetsForProject(project: Project): Promise<ApifyTweetResul
 
 async function rescrapeTweetsByUrl(tweetUrls: string[]): Promise<ApifyTweetResult[]> {
   if (tweetUrls.length === 0) {
+    return [];
+  }
+
+  if (USE_MOCK_DATA) {
+    // In mock mode, return empty array for now
+    // Could be enhanced to simulate updated metrics
     return [];
   }
 
